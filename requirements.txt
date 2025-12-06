@@ -1,0 +1,8 @@
+streamlit
+yt-dlp
+ffmpeg-python
+librosa
+torch
+funasr
+modelscope
+watchdog
