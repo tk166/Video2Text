@@ -10,6 +10,63 @@ from audio_downloader import download_audio
 from audio_converter import convert_to_wav
 from funasr import AutoModel
 
+MODEL_MAP = {
+    "🇨🇳 中文 - Paraformer (工业级标准)": {
+        "model_id": "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+        "vad_id": "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+        "punc_id": "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
+        "desc": "阿里达摩院王牌模型。支持精准的字级/句级时间戳，适合长音频智能断句。"
+    },
+    "🌏 多语言 - SenseVoice (情感识别)": {
+        "model_id": "iic/SenseVoiceSmall",
+        "vad_id": None, # SenseVoice 内部集成了 VAD
+        "punc_id": None,
+        "desc": "小巧强悍，支持中/英/日/韩/粤。不仅能转写，还能识别说话人的情绪（开心/生气等）。"
+    }
+}
+
+with st.sidebar:
+    st.header("模型选择")
+    selected_label = st.selectbox("模型", list(MODEL_MAP.keys()))
+    config = MODEL_MAP[selected_label]
+    st.info(config["desc"])
+    
+    # SenseVoice 特有选项
+    language = "auto"
+    if "SenseVoice" in selected_label:
+        language = st.selectbox("目标语言", ["auto", "zh", "en", "ja", "ko", "yue"])
+
+def get_local_path(model_id):
+    cache_root = os.path.expanduser("~/.cache/modelscope/hub/models")
+    local_dir = os.path.join(cache_root, model_id)
+    return local_dir if os.path.exists(local_dir) else model_id
+
+def select_device():
+    if torch.cuda.is_available():
+        device_select = "cuda"
+    # elif torch.backends.mps.is_available(): # M4的mps不稳定，先注掉
+    #     device_select = "mps"
+    else:
+        device_select = "cpu"
+    return device_select
+
+def load_model(cfg, device_select):
+    args = {
+        "model": get_local_path(cfg["model_id"]),
+        "device": device_select,
+        "disable_update": True,
+        "trust_remote_code": True,
+    }
+    # 加载 VAD 和 标点 (如果是 Paraformer)
+    if cfg["vad_id"]:
+        args["vad_model"] = get_local_path(cfg["vad_id"])
+        args["vad_kwargs"] = {"disable_update": True}
+    if cfg["punc_id"]:
+        args["punc_model"] = get_local_path(cfg["punc_id"])
+        args["punc_kwargs"] = {"disable_update": True}
+        
+    return AutoModel(**args)
+
 # --- 核心组件：日志重定向类 ---
 class StreamlitLogger:
     def __init__(self, log_container):
@@ -215,30 +272,29 @@ if st.button("开始处理", type="primary") and video_url:
 
             # 步骤3: 加载模型
             status.update(label="正在加载 FunASR 模型...", state="running")
-            
-            if torch.cuda.is_available():
-                device_select = "cuda"
-            # elif torch.backends.mps.is_available(): # 实测Apple M4的mps稳定性不太行所以先注掉了
-            #     device_select = "mps"
-            else:
-                device_select = "cpu"
-                
+            device_select = select_device()
             st.write(f"⚙️ 检测到计算设备: {device_select}")
             
-            model = AutoModel(model="paraformer-zh", model_revision="v2.0.4",
-                    vad_model="fsmn-vad", vad_model_revision="v2.0.4",
-                    punc_model="ct-punc-c", punc_model_revision="v2.0.4",
-                    device=device_select,
-                    # 注意：设为0或1，多进程可能导致 print 捕获不到
-                    num_workers=0, 
-                    )
+            try:
+                model = load_model(config, device_select)
+                st.success(f"模型加载完毕: {config['model_id'].split('/')[1]}")
+            except Exception as e:
+                st.error(f"加载失败，请确认已运行过 download_models.py\n错误: {e}")
+                st.stop()
             st.write("✅ 模型加载成功")
 
             # 步骤4: 执行语音识别
             status.update(label="正在进行语音识别 (Inference)...", state="running")
             
             # FunASR 的 generate 内部通常会有进度条打印，这里会被捕获
-            res = model.generate(input=wav_file, return_sentence_timestamp=True)
+            res = model.generate(input=wav_file, 
+                cache={},
+                language=language,
+                use_itn=False,
+                batch_size_s=60, # 尝试限制每次处理 60秒，防止内存爆掉
+                merge_vad=True,
+                merge_length_s=15,
+            )
             st.session_state.raw_res = res 
             st.write("✅ 识别推理结束")
 

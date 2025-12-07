@@ -5,6 +5,8 @@
 ```
 pip install -r requirements.txt
 
+python download_model.py --all
+
 streamlit run converter_app.py
 ```
 
