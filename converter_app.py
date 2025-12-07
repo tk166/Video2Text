@@ -218,8 +218,8 @@ if st.button("开始处理", type="primary") and video_url:
             
             if torch.cuda.is_available():
                 device_select = "cuda"
-            elif torch.backends.mps.is_available():
-                device_select = "mps"
+            # elif torch.backends.mps.is_available(): # 实测Apple M4的mps稳定性不太行所以先注掉了
+            #     device_select = "mps"
             else:
                 device_select = "cpu"
                 
