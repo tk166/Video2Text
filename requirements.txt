@@ -3,6 +3,7 @@ yt-dlp
 ffmpeg-python
 librosa
 torch
+torchaudio
 funasr
 modelscope
 watchdog
