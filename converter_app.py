@@ -9,6 +9,64 @@ import re
 from audio_downloader import download_audio
 from audio_converter import convert_to_wav
 from funasr import AutoModel
+from modelscope.hub.snapshot_download import snapshot_download
+# ================= 配置区 =================
+# 你用到的三个模型 ID 和版本
+MODEL_CONFIG = {
+    "asr":  {"id": "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch", "ver": "v2.0.4"},
+    "vad":  {"id": "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",  "ver": "v2.0.4"},
+    "punc": {"id": "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch", "ver": "v2.0.4"},
+}
+# ================= 预下载/检查 =================
+@st.cache_data(show_spinner="正在检查本地模型完整性...")
+def check_and_download_models():
+    local_paths = {}
+    print("----- 开始检查模型文件 -----")
+    try:
+        # 遍历三个模型进行检查
+        for key, cfg in MODEL_CONFIG.items():
+            # snapshot_download 会自动判断本地缓存
+            # 如果本地存在，它不会发起网络请求，直接返回路径，速度极快
+            path = snapshot_download(model_id=cfg["id"], revision=cfg["ver"])
+            local_paths[key] = path
+            print(f"✅ {key.upper()} 模型就绪: {path}")
+            
+    except Exception as e:
+        st.error(f"模型下载失败，请检查网络或代理设置！\n报错信息: {e}")
+        st.stop() # 停止运行后续代码
+        
+    return local_paths
+# ================= 加载进显存（防卡顿核心） =================
+@st.cache_resource(show_spinner="正在加载神经网络到显存 (只加载一次)...")
+def load_funasr_engine(device_select="cuda"):
+    # 1. 先确保文件都在（引用上面的函数）
+    paths = check_and_download_models()
+    
+    # 2. 初始化重型对象
+    print("🚀 正在初始化 FunASR AutoModel...")
+    model = AutoModel(
+        model=paths["asr"],
+        model_revision=MODEL_CONFIG["asr"]["ver"],
+        
+        vad_model=paths["vad"],
+        vad_model_revision=MODEL_CONFIG["vad"]["ver"],
+        
+        punc_model=paths["punc"],
+        punc_model_revision=MODEL_CONFIG["punc"]["ver"],
+        
+        device=device_select,
+        num_workers=0, # 避免 Streamlit 多线程报错
+    )
+    print("🎉 模型初始化完毕！")
+    return model
+
+if torch.cuda.is_available():
+    device_select = "cuda"
+# elif torch.backends.mps.is_available(): # 实测Apple M4的mps稳定性不太行所以先注掉了
+#     device_select = "mps"
+else:
+    device_select = "cpu"
+model_instance = load_funasr_engine(device_select)
 
 # --- 核心组件：日志重定向类 ---
 class StreamlitLogger:
@@ -216,29 +274,14 @@ if st.button("开始处理", type="primary") and video_url:
             # 步骤3: 加载模型
             status.update(label="正在加载 FunASR 模型...", state="running")
             
-            if torch.cuda.is_available():
-                device_select = "cuda"
-            # elif torch.backends.mps.is_available(): # 实测Apple M4的mps稳定性不太行所以先注掉了
-            #     device_select = "mps"
-            else:
-                device_select = "cpu"
-                
             st.write(f"⚙️ 检测到计算设备: {device_select}")
-            
-            model = AutoModel(model="paraformer-zh", model_revision="v2.0.4",
-                    vad_model="fsmn-vad", vad_model_revision="v2.0.4",
-                    punc_model="ct-punc-c", punc_model_revision="v2.0.4",
-                    device=device_select,
-                    # 注意：设为0或1，多进程可能导致 print 捕获不到
-                    num_workers=0, 
-                    )
             st.write("✅ 模型加载成功")
 
             # 步骤4: 执行语音识别
             status.update(label="正在进行语音识别 (Inference)...", state="running")
             
             # FunASR 的 generate 内部通常会有进度条打印，这里会被捕获
-            res = model.generate(input=wav_file, return_sentence_timestamp=True)
+            res = model_instance.generate(input=wav_file, return_sentence_timestamp=True)
             st.session_state.raw_res = res 
             st.write("✅ 识别推理结束")
 
@@ -298,8 +341,8 @@ if st.session_state.is_processed:
                 # key="srt_min_len" 会自动记录状态
                 min_len = st.slider(
                     "⏱️ 最小字幕字数 (逗号合并阈值)", 
-                    min_value=5, 
-                    max_value=50, 
+                    min_value=8, 
+                    max_value=80, 
                     value=15, 
                     step=1,
                     key="srt_min_len_slider", # 必须给个独立的 key
