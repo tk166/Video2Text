@@ -204,23 +204,32 @@ def generate_smart_srt(inference_result, min_length=10):
     return srt_content
 
 def update_srt_by_slider():
-    """
-    当滑动条变化时触发此函数：
-    1. 获取滑动条的新值
-    2. 重新计算 SRT
-    3. 强制覆盖 text_area 的状态
-    """
-    # 获取滑动条当前的值 (通过 key 获取)
     min_len = st.session_state.srt_min_len_slider
-    
     if "raw_res" in st.session_state:
-        # 重新生成内容
+        # 1. 生成新内容
         new_content = generate_smart_srt(st.session_state.raw_res, min_length=min_len)
-        
-        # 💥 关键点：直接修改 session_state 中 text_area 对应的 key
-        # 这会强制 Streamlit 在下一次渲染时使用这个新值
-        st.session_state.editor_srt = new_content
+        # 2. 更新核心数据
         st.session_state.srt_result = new_content
+        
+        # 3. 这一步是为了让当前显示的文本框也立刻变
+        if "transcription_result" in st.session_state:
+            import hashlib
+            md5 = hashlib.md5(st.session_state.transcription_result.encode('utf-8')).hexdigest()
+            current_widget_key = f"editor_srt_{md5[:10]}"
+            st.session_state[current_widget_key] = new_content
+
+def clean_url(url):
+    # 如果是 Bilibili (包含 'bilibili')
+    if "bilibili" in url:
+        match = re.search(r'(BV[a-zA-Z0-9]+)', url)
+        if match:
+            return f"https://www.bilibili.com/video/{match.group(1)}"
+    # 如果是 YouTube，通常不需要去参数，或者只去除无关参数 (yt-dlp 通常能自动处理)
+    # 但为了保险，可以去掉 & 及其后面的内容 (YouTube ID 在 ?v= 之后，不能切 ?)
+    if "youtube" in url or "youtu.be" in url:
+        return url.split('&')[0]
+    return url.split('?')[0]
+
 # --- 主程序 ---
 
 # 初始化session state
@@ -236,7 +245,8 @@ st.title("🎧 Video2Text - 语音识别工具")
 st.markdown("将YouTube/Bilibili视频转换为文字")
 
 # 视频链接输入
-video_url = st.text_input("请输入YouTube或Bilibili视频链接:", placeholder="https://www.youtube.com/watch?v=...")
+video_url_raw = st.text_input("请输入YouTube或Bilibili视频链接:", placeholder="https://www.youtube.com/watch?v=...")
+video_url = clean_url(video_url_raw)
 
 # 处理按钮
 if st.button("开始处理", type="primary") and video_url:
@@ -320,90 +330,78 @@ if st.button("开始处理", type="primary") and video_url:
 if st.session_state.is_processed:
     st.divider()
     
+    # 0. 准备工作：计算 MD5 (为了让每次新视频都生成一个全新的文本框，彻底解决残留问题)
+    # 这一步非常重要，能解决你最开始提到的“第二段视频不更新”的问题
+    import hashlib
+    def calculate_md5(text):
+        return hashlib.md5(text.encode('utf-8')).hexdigest() if text else ""
+    
+    transcript_md5 = calculate_md5(st.session_state.transcription_result)
     # 1. 顶部控制栏
     col_ctrl_1, col_ctrl_2 = st.columns([1, 3])
     with col_ctrl_1:
         st.subheader("识别结果")
     with col_ctrl_2:
-        # 使用 toggle 开关，默认关闭(纯文本模式)
         is_srt_mode = st.toggle("开启 SRT 字幕模式", value=False)
-
     # 2. 动态逻辑处理
     if is_srt_mode:
         # --- SRT 模式 ---
-        # 创建一个更细致的设置栏
         with st.container():
             col_set_1, col_set_2 = st.columns([2, 1])
             with col_set_1:
                 st.info("💡 智能断句：逗号会尝试合并，直到达到最小字数；句号强制换行。")
             with col_set_2:
-                # 滑动条：控制断句阈值
-                # key="srt_min_len" 会自动记录状态
                 min_len = st.slider(
-                    "⏱️ 最小字幕字数 (逗号合并阈值)", 
-                    min_value=8, 
-                    max_value=80, 
-                    value=15, 
-                    step=1,
-                    key="srt_min_len_slider", # 必须给个独立的 key
-                    on_change=update_srt_by_slider # 绑定回调函数
+                    "⏱️ 最小字幕字数", 
+                    min_value=8, max_value=80, value=15, step=1,
+                    key="srt_min_len_slider",
+                    on_change=update_srt_by_slider
                 )
         
-        
-        # 第一次进入 SRT 模式时的初始化逻辑
-        if "editor_srt" not in st.session_state:
-             # 如果还没生成过，先生成一次默认的
+        # 准备数据和 Key
+        # 如果 SRT 还没生成过（比如刚处理完），先用当前滑块值生成一次
+        if "srt_result" not in st.session_state or not st.session_state.srt_result:
              if "raw_res" in st.session_state:
-                 st.session_state.editor_srt = generate_smart_srt(st.session_state.raw_res, min_length=15)
-             else:
-                 st.session_state.editor_srt = ""
-        # current_content = st.session_state.editor_srt
+                 st.session_state.srt_result = generate_smart_srt(st.session_state.raw_res, min_length=min_len)
+        
+        current_content = st.session_state.srt_result
         current_label = f"🎬 SRT 字幕 (每行至少 {min_len} 字)"
         current_filename = "subtitle.srt"
-        widget_key = "editor_srt" 
+        widget_key = f"editor_srt_{transcript_md5[:10]}"
     else:
         # --- 纯文本模式 ---
-        if "editor_txt" not in st.session_state:
-            st.session_state.editor_txt = st.session_state.transcription_result
-        # current_content = st.session_state.transcription_result
+        current_content = st.session_state.transcription_result
         current_label = "📄 纯文本编辑"
         current_filename = "transcription.txt"
-        widget_key = "editor_txt"
+        widget_key = f"editor_txt_{transcript_md5[:10]}"
 
-    # 3. 统一的编辑区域
-    # 注意：我们将 session_state 的值赋给 value 作为初始值
-    # 用户的修改会自动更新到 st.session_state[widget_key] 中
+    # 3. 即时初始化 (Just-In-Time Initialization)
+    if widget_key not in st.session_state:
+        st.session_state[widget_key] = current_content
+    # 4. 渲染文本框
     edited_content = st.text_area(
         label=current_label,
         height=600,
-        key=widget_key 
+        key=widget_key
     )
-
-    # 4. 数据同步回写 (这一步很重要)
-    # 当用户编辑时，Streamlit 自动更新了 session_state[widget_key]
-    # 但我们需要把它同步回我们自定义的 result 变量，以防下次切换时数据丢失
+    # 5. 数据同步回写
     if is_srt_mode:
         st.session_state.srt_result = edited_content
     else:
         st.session_state.transcription_result = edited_content
-
-    # 5. 底部操作栏
+    # 6. 底部下载按钮
     col_act_1, col_act_2 = st.columns([3, 1])
-    
     with col_act_1:
-        # 显示当前模式的状态提示
         if is_srt_mode:
             st.caption("ℹ️ 当前为字幕模式，编辑内容将保存为 .srt 格式")
         else:
             st.caption("ℹ️ 当前为纯文本模式，编辑内容将保存为 .txt 格式")
-            
     with col_act_2:
-        # 下载按钮也是动态的
         st.download_button(
             label=f"📥 导出 {current_filename}",
             data=edited_content,
             file_name=current_filename,
             mime="text/plain",
-            type="primary", # 醒目样式
+            type="primary",
             use_container_width=True
         )
