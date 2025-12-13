@@ -1,4 +1,5 @@
 streamlit
+flask
 yt-dlp
 ffmpeg-python
 librosa
@@ -7,3 +8,4 @@ torchaudio
 funasr
 modelscope
 watchdog
+cryptography

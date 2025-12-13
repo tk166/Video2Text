@@ -246,36 +246,51 @@ st.markdown("将YouTube/Bilibili视频转换为文字")
 
 # 视频链接输入
 video_url_raw = st.text_input("请输入YouTube或Bilibili视频链接:", placeholder="https://www.youtube.com/watch?v=...")
+
+# Cookie文件上传
+cookie_file = None
+use_cookie = st.checkbox("使用Cookie文件（用于登录网站）")
+if use_cookie:
+    uploaded_file = st.file_uploader("上传Cookie文件", type=["txt", "cookies"])
+    if uploaded_file is not None:
+        # 保存上传的cookie文件到临时位置
+        import tempfile
+        temp_cookie_file = tempfile.NamedTemporaryFile(delete=False, suffix=".txt")
+        temp_cookie_file.write(uploaded_file.getvalue())
+        temp_cookie_file.close()
+        cookie_file = temp_cookie_file.name
+        st.success(f"Cookie文件已上传: {uploaded_file.name}")
+
 video_url = clean_url(video_url_raw)
 
 # 处理按钮
 if st.button("开始处理", type="primary") and video_url:
     st.session_state.is_processed = False
-    
+
     # 1. 创建一个日志显示区域（默认折叠）
     with st.expander("查看详细运行日志 (Terminal Output)", expanded=True):
         log_placeholder = st.empty()
-    
+
     # 实例化我们的日志捕获器
     logger = StreamlitLogger(log_placeholder)
-    
+
     # 2. 使用 st.status 创建漂亮的进度容器
     with st.status("正在初始化任务...", expanded=True) as status:
-        
+
         # --- 关键：开始劫持 stdout ---
-        sys.stdout = logger 
+        sys.stdout = logger
         sys.stderr = logger
-        
+
         try:
             # 步骤1: 下载音频
             status.update(label="正在下载音频 (yt-dlp)...", state="running")
             st.write("🚀 开始调用下载工具...") # 这行字会显示在日志框里
-            
+
             # 注意：如果 download_audio 内部使用了 print，会被捕获。
             # 如果它使用 subprocess 直接输出到系统终端，可能无法被捕获（见下方说明）。
-            audio_file = download_audio(video_url)
+            audio_file = download_audio(video_url, cookie_file)
             st.write(f"✅ 下载完成: {os.path.basename(audio_file)}")
-            
+
             # 步骤2: 转换音频格式
             status.update(label="正在转换音频格式 (ffmpeg)...", state="running")
             wav_file = convert_to_wav(audio_file)
