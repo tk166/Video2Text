@@ -25,21 +25,29 @@ winget install Gyan.FFmpeg
 pip install -r requirements.txt
 ```
 
-### 图形界面版本
+### 集成GUI Client模式
 ```
 streamlit run converter_app.py --server.port=8351
 ```
+浏览器直接访问`http://127.0.0.1:8351/`即可使用
 
-### 远程API版本
+![网页UI界面](bak/example2.png)
+
+### 远程API Server模式
 ```
 python converter_app_remote.py
 ```
 
 详细API文档请参见 [README_REMOTE.md](README_REMOTE.md)
 
+需要搭配功能更完备的独立前端GUI Client程序使用（详见 https://github.com/tk166/Video2TextGUI ）
+
+![Server模式下的GUI Client主界面](bak/example.png)
+
+
 ## Cookie 文件支持
 
-本工具支持使用cookie文件来访问需要登录的视频内容。在图形界面中，您可以勾选"使用Cookie文件"选项并上传cookie文件。
+本工具的两种工作模式均支持使用cookie文件来访问需要登录的视频内容。在图形界面中，您可以勾选"使用Cookie文件"选项并上传cookie文件。
 
 Cookie文件需要是Netscape格式。更多信息请参见 [COOKIE_FORMAT.md](COOKIE_FORMAT.md)
 
