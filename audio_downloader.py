@@ -23,10 +23,10 @@ def download_audio(video_url, cookiefile=None, extra_info=False):
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
-            'preferredquality': '192',
+            'preferredquality': '320',
         }],
         'postprocessor_args': [
-            '-ar', '16000'
+            '-ar', '48000'
         ],
         'prefer_ffmpeg': True,
         'keepvideo': False,
