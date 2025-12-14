@@ -7,6 +7,7 @@ import threading
 import time
 import traceback
 import re
+import sys
 import logging
 from flask import Flask, request, jsonify, send_file
 import torch
@@ -23,8 +24,9 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler("converter_app_remote.log"),
-        logging.StreamHandler()
-    ]
+        logging.StreamHandler(sys.stdout)
+    ],
+    force=True 
 )
 logger = logging.getLogger(__name__)
 
